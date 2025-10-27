@@ -1,4 +1,4 @@
-requests
-beautifulsoup4
-flask
-gunicorn
+requests==2.32.3
+beautifulsoup4==4.12.3
+flask==3.0.3       # nur nötig, wenn du optional einen /health-Endpunkt möchtest
+gunicorn==23.0.0   # Render installiert es oft automatisch, schadet aber nicht

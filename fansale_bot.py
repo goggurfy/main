@@ -1,71 +1,91 @@
-# fansale_watcher.py
 import os
 import time
-import threading
 import requests
 from bs4 import BeautifulSoup
-from flask import Flask
 
-# ===== KONFIGURATION (aus ENV) =====
-URL = os.getenv("EVENT_URL", "https://www.fansale.de/tickets/all/radiohead/520")
-CHECK_INTERVAL = int(os.getenv("CHECK_INTERVAL", "60"))  # Sekunden
+# === KONFIGURATION ===
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
-SEARCH_TERM = os.getenv("SEARCH_TERM", "Angebote ab")
+URL = "https://www.fansale.de/tickets/all/radiohead/520"  # <- deine Fansale-URL
+SEARCH_TERM = "Angebot ab"               # <- z. B. Künstlername
+CHECK_INTERVAL = 300                                # Sekunden zwischen Checks (z. B. 5 min)
+HEALTH_INTERVAL = 43200                             # 12 Stunden in Sekunden
 
-# ===== Telegram senden =====
-def send_message(text):
+# === FUNKTION: Nachricht an Telegram senden ===
+def send_telegram_message(message):
     if not BOT_TOKEN or not CHAT_ID:
         print("WARN: BOT_TOKEN oder CHAT_ID nicht gesetzt. Nachricht nicht gesendet.")
         return
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     try:
-        resp = requests.post(url, data={"chat_id": CHAT_ID, "text": text}, timeout=10)
-        print("Telegram Response:", resp.status_code, resp.text)
+        resp = requests.get(
+            f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+            params={"chat_id": CHAT_ID, "text": message},
+            timeout=10
+        )
+        if resp.status_code == 200:
+            print(f"[OK] Telegram Nachricht gesendet: {message}")
+        else:
+            print(f"[WARN] Telegram API Fehler: {resp.status_code}")
     except Exception as e:
-        print("Fehler beim Telegram senden:", e)
+        print("Fehler beim Senden an Telegram:", e)
 
-# ===== Seite prüfen =====
+
+# === FUNKTION: Fansale-Seite prüfen ===
 def check_site():
-    try:
-        r = requests.get(URL, timeout=15)
-        r.raise_for_status()
-        text = BeautifulSoup(r.text, "html.parser").get_text()
-        return SEARCH_TERM.lower() in text.lower()
-    except Exception as e:
-        print("Fehler beim Abrufen/Auswerten:", e)
-        return False
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/123.0 Safari/537.36"
+        )
+    }
 
-# ===== Monitoring-Loop =====
-def watcher_loop():
-    last = None
-    # Beim ersten Start kurz testen, ob Telegram läuft
-    try:
-        send_message("🚀 Fansale-Watcher gestartet (Testnachricht).")
-    except Exception as e:
-        print("Test-Nachricht fehlgeschlagen:", e)
+    for attempt in range(3):
+        try:
+            r = requests.get(URL, headers=headers, timeout=30)
+            r.raise_for_status()
+            text = BeautifulSoup(r.text, "html.parser").get_text()
+            found = SEARCH_TERM.lower() in text.lower()
+            print(f"[OK] Versuch {attempt+1}: Seite erfolgreich abgerufen.")
+            return found
 
-    print("Starte Monitoring für:", URL)
+        except requests.exceptions.Timeout:
+            print(f"[WARN] Timeout bei Versuch {attempt+1}")
+        except requests.exceptions.RequestException as e:
+            print(f"[WARN] Netzwerkfehler bei Versuch {attempt+1}: {e}")
+
+        time.sleep(5)  # warte 5 Sekunden vor erneutem Versuch
+
+    # Nach 3 Fehlversuchen Telegram-Warnung senden
+    send_telegram_message("⚠️ Fansale nicht erreichbar (3x Timeout oder Fehler).")
+    return False
+
+
+# === MAIN LOOP ===
+def main():
+    print("🚀 Fansale Watcher gestartet.")
+    send_telegram_message("🤖 Fansale-Watcher ist gestartet!")
+
+    last_health_ping = time.time()
+
     while True:
-        available = check_site()
-        if available != last:
-            msg = ("✅ Tickets verfügbar!\n" if available else "❌ Keine Tickets mehr.\n") + URL
-            send_message(msg)
-            last = available
+        try:
+            if check_site():
+                send_telegram_message("🎫 Tickets gefunden! Schnell prüfen!")
+            else:
+                print("[INFO] Keine Tickets gefunden.")
+
+            # Alle 12 h Health-Ping schicken
+            if time.time() - last_health_ping >= HEALTH_INTERVAL:
+                send_telegram_message("✅ Bot läuft noch stabil.")
+                last_health_ping = time.time()
+
+        except Exception as e:
+            print(f"[ERROR] Unerwarteter Fehler: {e}")
+            send_telegram_message(f"⚠️ Unerwarteter Fehler: {e}")
+
         time.sleep(CHECK_INTERVAL)
 
-# ===== Flask-App (einfacher Health-Endpoint) =====
-app = Flask(__name__)
 
-@app.route("/")
-def index():
-    return "Fansale-Watcher läuft."
-
-@app.route("/health")
-def health():
-    return "ok"
-
-# Start watcher in Background-Thread beim Import (Gunicorn importiert das Modul)
-threading.Thread(target=watcher_loop, daemon=True).start()
-
-# gunicorn sucht nach 'app' im Modul, daher exportieren wir 'app' oben
+if __name__ == "__main__":
+    main()

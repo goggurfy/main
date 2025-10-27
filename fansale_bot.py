@@ -10,7 +10,7 @@ from flask import Flask
 URL = os.getenv("EVENT_URL", "https://www.fansale.de/tickets/all/radiohead/520")
 CHECK_INTERVAL = int(os.getenv("CHECK_INTERVAL", "60"))  # Sekunden
 BOT_TOKEN = os.getenv("8298211963:AAEXzbeLCMeiagQuB8JZ0CUqkzKcCzQiA78")
-CHAT_ID = os.getenv("300522")
+CHAT_ID = os.getenv("30052226")
 SEARCH_TERM = os.getenv("SEARCH_TERM", "Angebote ab")
 
 # ===== Telegram senden =====
